@@ -1,5 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import Image from 'next/image';
 
 export interface Scenario {
   id: string;
@@ -29,10 +30,16 @@ const ScenarioCard: React.FC<ScenarioCardProps> = ({ scenario, onSelect }) => {
       onClick={() => onSelect(scenario)}
     >
       <div className="relative h-48">
-        <img
+        <Image
           src={scenario.imageUrl}
           alt={scenario.title}
-          className="w-full h-full object-cover"
+          fill
+          className="object-cover"
+          onError={(e) => {
+            const imgElement = e.target as HTMLImageElement;
+            imgElement.src = '/scenarios/default-scenario.jpg';
+          }}
+          priority
         />
       </div>
       <div className="p-4">

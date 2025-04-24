@@ -13,6 +13,13 @@ const nextConfig = {
   },
   images: {
     domains: ['create-images-results.d-id.com'],
+    unoptimized: true,
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**',
+      },
+    ],
   },
 }
 
