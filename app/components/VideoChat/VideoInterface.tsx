@@ -35,8 +35,12 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
   const [isGeneratingResponse, setIsGeneratingResponse] = useState(false);
   const [currentMessage, setCurrentMessage] = useState('');
   const [useMockAPI, setUseMockAPI] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [conversationActive, setConversationActive] = useState(false);
 
   const startAudioMonitoring = async () => {
+    if (isPaused) return;
+    
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioStreamRef.current = stream;
@@ -54,7 +58,7 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       
       const checkAudioLevel = () => {
-        if (!isListening) return;
+        if (!isListening || isPaused) return;
         
         analyser.getByteFrequencyData(dataArray);
         const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
@@ -91,6 +95,14 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
     };
   }, [scenarioTitle]);
 
+  // 当暂停状态变化时，确保停止语音识别
+  useEffect(() => {
+    if (isPaused && isListening) {
+      recognitionRef.current?.stop();
+      stopAudioMonitoring();
+    }
+  }, [isPaused, isListening]);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -101,6 +113,12 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
         recognitionRef.current.lang = 'en-US';
 
         recognitionRef.current.onstart = () => {
+          // 如果在暂停状态，立即停止语音识别
+          if (isPaused) {
+            console.log("Recognition started while paused - stopping");
+            recognitionRef.current?.stop();
+            return;
+          }
           setIsListening(true);
           onSpeechStart();
           setError(null);
@@ -112,11 +130,13 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
           onSpeechEnd();
           stopAudioMonitoring();
           
-          // 如果没有检测到语音，自动重新开始监听
-          if (!transcript && !error) {
+          // 只有在对话活跃且未暂停时才自动重启
+          if (!transcript && !error && conversationActive && !isPaused) {
             console.log('No speech detected, restarting...');
             setTimeout(() => {
-              recognitionRef.current?.start();
+              if (conversationActive && !isPaused) {
+                recognitionRef.current?.start();
+              }
             }, 100);
           }
         };
@@ -135,6 +155,9 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
         };
 
         recognitionRef.current.onresult = async (event: any) => {
+          // 如果暂停了，不处理语音识别结果
+          if (isPaused) return;
+          
           const current = event.resultIndex;
           const transcript = event.results[current][0].transcript;
           setTranscript(transcript);
@@ -147,9 +170,15 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
         setError('您的浏览器不支持语音识别。请使用 Chrome 浏览器。');
       }
     }
-  }, [onSpeechStart, onSpeechEnd, isProcessing, scenarioTitle, transcript]);
+  }, [onSpeechStart, onSpeechEnd, isProcessing, scenarioTitle, transcript, isPaused, conversationActive]);
 
   const handleSpeechResult = async (transcript: string) => {
+    // 如果暂停了或不在活跃对话中，不处理语音
+    if (isPaused || !conversationActive) {
+      console.log("Speech processing skipped - isPaused:", isPaused, "conversationActive:", conversationActive);
+      return;
+    }
+    
     setIsProcessing(true);
     setCurrentMessage(transcript);
     console.log("Starting to process speech: ", transcript);
@@ -195,21 +224,91 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
     }
   };
 
-  const toggleListening = async () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      stopAudioMonitoring();
+  // 合并开始对话/暂停对话功能
+  const toggleConversation = async () => {
+    // 如果已经处于对话状态，则切换暂停/继续
+    if (conversationActive) {
+      const newPausedState = !isPaused;
+      setIsPaused(newPausedState);
+      
+      if (newPausedState) {
+        console.log("Pausing conversation...");
+        // 暂停所有功能
+        if (isListening) {
+          console.log("Stopping speech recognition");
+          recognitionRef.current?.stop();
+          stopAudioMonitoring();
+        }
+        if (videoRef.current && !videoRef.current.paused) {
+          console.log("Pausing video playback");
+          videoRef.current.pause();
+        }
+        // 确保所有处理都停止
+        setIsProcessing(false);
+        setIsGeneratingResponse(false);
+        setCurrentMessage('');
+      } else {
+        console.log("Resuming conversation...");
+        // 继续对话
+        if (videoRef.current && videoRef.current.paused) {
+          console.log("Resuming video playback");
+          videoRef.current.play();
+        }
+        
+        // 重新开始语音识别，但要确保不在视频播放时启动
+        if (!isListening && !isProcessing && (!videoRef.current || videoRef.current.ended)) {
+          console.log("Restarting speech recognition");
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
+            recognitionRef.current?.start();
+          } catch (error) {
+            console.error('Failed to restart speech recognition:', error);
+            setError('无法访问麦克风。请确保麦克风已连接并授权使用。');
+          }
+        }
+      }
     } else {
+      // 开始全新对话
+      setConversationActive(true);
+      setIsPaused(false);
       setError(null);
+      setIsGeneratingResponse(true);
+      
       try {
+        // 生成开场白视频
+        const avatarUrl = process.env.NEXT_PUBLIC_AVATAR_SOURCE_URL;
+        if (!avatarUrl) {
+          throw new Error('Avatar configuration is missing');
+        }
+
+        // 获取开场白文本
+        const greeting = await chatService.getInitialGreeting();
+        console.log("Got initial greeting:", greeting);
+
+        // 生成开场白视频
+        const video = await videoService.generateVideo(greeting, avatarUrl);
+        console.log("Generated initial video:", video);
+        setVideoUrl(video.url);
+        
+        // 准备视频播放
+        if (videoRef.current) {
+          videoRef.current.load();
+          videoRef.current.play();
+        }
+
         // 测试麦克风是否可用
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach(track => track.stop());
         
+        // 开始语音识别
         recognitionRef.current?.start();
       } catch (error) {
-        console.error('Failed to start speech recognition:', error);
-        setError('无法访问麦克风。请确保麦克风已连接并授权使用。');
+        console.error('Failed to start conversation:', error);
+        setError('启动对话失败。请检查麦克风并重试。');
+        setConversationActive(false);
+      } finally {
+        setIsGeneratingResponse(false);
       }
     }
   };
@@ -221,6 +320,43 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
     console.log("Switched to mock API mode:", newState);
   };
 
+  // 确定按钮的状态和文本
+  const getButtonState = () => {
+    if (!conversationActive) {
+      return {
+        text: "开始对话",
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+          </svg>
+        ),
+        bgColor: "bg-green-500 hover:bg-green-600"
+      };
+    } else if (isPaused) {
+      return {
+        text: "继续对话",
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+          </svg>
+        ),
+        bgColor: "bg-green-500 hover:bg-green-600"
+      };
+    } else {
+      return {
+        text: "暂停对话",
+        icon: (
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+          </svg>
+        ),
+        bgColor: "bg-red-500 hover:bg-red-600"
+      };
+    }
+  };
+
+  const buttonState = getButtonState();
+
   return (
     <div className="w-full max-w-4xl mx-auto p-4">
       <motion.div
@@ -229,80 +365,103 @@ const VideoInterface: React.FC<VideoInterfaceProps> = ({
         className="relative aspect-video bg-gray-900 rounded-lg overflow-hidden"
       >
         {videoUrl ? (
-          <video
-            ref={videoRef}
-            className="w-full h-full object-cover"
-            src={videoUrl}
-            autoPlay
-            playsInline
-            controls={false}
-            onEnded={() => {
-              console.log("Video playback ended, starting new conversation round");
-              // 视频播放结束后，自动开始新一轮对话
-              if (!isListening && !isProcessing) {
-                toggleListening();
-              }
-            }}
-            onError={(e) => {
-              console.error("Video playback error:", e);
-              setError(`视频播放错误: ${(e.target as HTMLVideoElement).error?.message || '未知错误'}`);
-            }}
-            onLoadStart={() => console.log("Video load started")}
-            onCanPlay={() => console.log("Video can play now")}
-            onPlay={() => console.log("Video started playing")}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full flex-col gap-4">
-            <div className="w-32 h-32 bg-gray-700 rounded-full flex items-center justify-center">
-              <span className="text-4xl text-gray-400">AI</span>
+          <>
+            <video
+              ref={videoRef}
+              className="w-full h-full object-cover"
+              src={videoUrl}
+              autoPlay
+              playsInline
+              controls={false}
+              onEnded={() => {
+                console.log("Video playback ended, starting new conversation round");
+                // 只有在对话活跃且未暂停时才继续
+                if (!isListening && !isProcessing && conversationActive && !isPaused) {
+                  try {
+                    recognitionRef.current?.start();
+                  } catch (error) {
+                    console.error("Failed to restart after video ended:", error);
+                  }
+                }
+              }}
+              onError={(e) => {
+                console.error("Video playback error:", e);
+                setError(`视频播放错误: ${(e.target as HTMLVideoElement).error?.message || '未知错误'}`);
+              }}
+              onLoadStart={() => console.log("Video load started")}
+            />
+            
+            <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-4">
+              <button
+                onClick={toggleConversation}
+                className={`px-6 py-3 rounded-full font-semibold text-white ${buttonState.bgColor} transition duration-200 flex items-center gap-2`}
+                disabled={isProcessing}
+              >
+                {buttonState.icon}
+                {buttonState.text}
+              </button>
             </div>
-            <p className="text-white text-xl">
-              {isGeneratingResponse ? 'Generating response...' : 'Ready to start conversation...'}
-            </p>
+          </>
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            {isGeneratingResponse ? (
+              <div className="text-white text-center">
+                <div className="mb-4">生成视频中...</div>
+                <div className="w-10 h-10 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto"></div>
+              </div>
+            ) : (
+              <div className="text-white text-center p-8">
+                <button
+                  onClick={toggleConversation}
+                  className={`px-6 py-3 rounded-full font-semibold text-white ${buttonState.bgColor} transition duration-200 flex items-center gap-2 mx-auto mb-4`}
+                  disabled={isProcessing}
+                >
+                  {buttonState.icon}
+                  {buttonState.text}
+                </button>
+                <p className="text-sm opacity-75">{scenarioTitle}</p>
+              </div>
+            )}
           </div>
         )}
-        
-        <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-2 w-full max-w-md px-4">
-          {error && (
-            <div className="bg-red-500/80 text-white px-4 py-2 rounded-lg text-sm text-center w-full">
-              {error}
-            </div>
-          )}
-          {isListening && (
-            <div className="w-full bg-gray-700 rounded-full h-2 mb-2">
-              <motion.div
-                className="bg-green-500 h-full rounded-full"
-                style={{ width: `${Math.min(100, audioLevel)}%` }}
-                animate={{ width: `${Math.min(100, audioLevel)}%` }}
-              />
-            </div>
-          )}
-          {currentMessage && (
-            <div className="bg-black/50 px-4 py-2 rounded-lg w-full">
-              <p className="text-white text-sm text-center">{currentMessage}</p>
-            </div>
-          )}
-          <button
-            className={`px-6 py-3 rounded-full ${
-              isProcessing || isGeneratingResponse
-                ? 'bg-yellow-500 cursor-not-allowed'
-                : isListening
-                ? 'bg-red-500 animate-pulse'
-                : 'bg-blue-500 hover:bg-blue-600'
-            } text-white font-medium transition-all w-full max-w-xs`}
-            onClick={toggleListening}
-            disabled={isProcessing || isGeneratingResponse}
-          >
-            {isGeneratingResponse 
-              ? '生成回应中...' 
-              : isProcessing 
-              ? '处理中...' 
-              : isListening 
-              ? '正在听...' 
-              : '开始说话'}
-          </button>
-        </div>
       </motion.div>
+
+      <div className="mt-6 p-4 bg-white rounded-lg shadow">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">
+              {!conversationActive 
+                ? '准备就绪' 
+                : isProcessing 
+                  ? '处理中...' 
+                  : isListening && !isPaused 
+                    ? '正在听...' 
+                    : isPaused 
+                      ? '已暂停' 
+                      : '等待回应'}
+            </span>
+            {isListening && !isPaused && (
+              <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-green-500 transition-all duration-100"
+                  style={{ width: `${Math.min(audioLevel * 2, 100)}%` }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {currentMessage && (
+          <div className="mt-4 p-3 bg-blue-50 rounded text-blue-800">
+            {currentMessage}
+          </div>
+        )}
+        {error && (
+          <div className="mt-4 p-3 bg-red-50 rounded text-red-800">
+            {error}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

@@ -2,31 +2,8 @@
 
 import React, { useState } from 'react';
 import VideoInterface from './components/VideoChat/VideoInterface';
-import ScenarioCard, { Scenario } from './components/ScenarioSelection/ScenarioCard';
-
-const scenarios: Scenario[] = [
-  {
-    id: '1',
-    title: 'Coffee Shop Chat',
-    description: 'Practice ordering and making small talk at a coffee shop',
-    difficulty: 'beginner',
-    imageUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=800&auto=format&fit=crop',
-  },
-  {
-    id: '2',
-    title: 'Job Interview',
-    description: 'Practice common job interview questions and responses',
-    difficulty: 'intermediate',
-    imageUrl: 'https://images.unsplash.com/photo-1565843708714-52ecf69ab81f?w=800&auto=format&fit=crop',
-  },
-  {
-    id: '3',
-    title: 'Business Negotiation',
-    description: 'Practice negotiating deals and contracts in English',
-    difficulty: 'advanced',
-    imageUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=800&auto=format&fit=crop',
-  },
-];
+import ScenarioSelector, { allScenarios } from './components/ScenarioSelector/ScenarioSelector';
+import { Scenario } from './components/ScenarioCard/ScenarioCard';
 
 export default function Home() {
   const [selectedScenario, setSelectedScenario] = useState<Scenario | null>(null);
@@ -56,9 +33,12 @@ export default function Home() {
           <div>
             <button
               onClick={() => setSelectedScenario(null)}
-              className="mb-4 text-blue-600 hover:text-blue-800"
+              className="mb-4 text-blue-600 hover:text-blue-800 flex items-center gap-1"
             >
-              ← Back to Scenarios
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clipRule="evenodd" />
+              </svg>
+              <span>Back to Scenarios</span>
             </button>
             <VideoInterface
               onSpeechStart={handleSpeechStart}
@@ -67,18 +47,10 @@ export default function Home() {
             />
           </div>
         ) : (
-          <div>
-            <h2 className="text-2xl font-semibold mb-4">Choose a Scenario</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {scenarios.map((scenario) => (
-                <ScenarioCard
-                  key={scenario.id}
-                  scenario={scenario}
-                  onSelect={handleScenarioSelect}
-                />
-              ))}
-            </div>
-          </div>
+          <ScenarioSelector 
+            selectedScenario={selectedScenario}
+            onScenarioSelect={handleScenarioSelect}
+          />
         )}
       </div>
     </main>
