@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import Script from "next/script";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -19,6 +20,42 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <Script id="prevent-404-loops" strategy="beforeInteractive">
+          {`
+            // 防止对不存在的图片重复请求
+            (function() {
+              const originalFetch = window.fetch;
+              const failedUrls = new Set();
+              
+              window.fetch = function(resource, init) {
+                const url = resource instanceof Request ? resource.url : resource;
+                
+                if (typeof url === 'string') {
+                  // 检查是否是已知失败的图片URL
+                  if (failedUrls.has(url)) {
+                    return Promise.reject(new Error('Resource previously failed to load'));
+                  }
+                  
+                  // 检查是否是场景图片
+                  if (url.includes('/scenarios/default-scenario.jpg')) {
+                    failedUrls.add(url);
+                    return Promise.reject(new Error('Prevented repeated request to missing image'));
+                  }
+                }
+                
+                return originalFetch.apply(this, arguments).catch(error => {
+                  // 记录失败的URL
+                  if (typeof url === 'string' && url.endsWith('.jpg') || url.endsWith('.png') || url.endsWith('.jpeg') || url.endsWith('.svg')) {
+                    failedUrls.add(url);
+                  }
+                  return Promise.reject(error);
+                });
+              };
+            })();
+          `}
+        </Script>
+      </head>
       <body className={inter.className}>
         {children}
       </body>

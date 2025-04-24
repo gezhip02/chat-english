@@ -10,21 +10,21 @@ const scenarios: Scenario[] = [
     title: 'Coffee Shop Chat',
     description: 'Practice ordering and making small talk at a coffee shop',
     difficulty: 'beginner',
-    imageUrl: '/scenarios/coffee-shop.jpg',
+    imageUrl: 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=800&auto=format&fit=crop',
   },
   {
     id: '2',
     title: 'Job Interview',
     description: 'Practice common job interview questions and responses',
     difficulty: 'intermediate',
-    imageUrl: '/scenarios/job-interview.jpg',
+    imageUrl: 'https://images.unsplash.com/photo-1565843708714-52ecf69ab81f?w=800&auto=format&fit=crop',
   },
   {
     id: '3',
     title: 'Business Negotiation',
     description: 'Practice negotiating deals and contracts in English',
     difficulty: 'advanced',
-    imageUrl: '/scenarios/business.jpg',
+    imageUrl: 'https://images.unsplash.com/photo-1557804506-669a67965ba0?w=800&auto=format&fit=crop',
   },
 ];
 
